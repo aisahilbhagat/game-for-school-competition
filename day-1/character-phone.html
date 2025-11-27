@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Avant - Mobile Controls</title>
+    <style>
+        body {
+            background-color: #1a1a1a;
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars */
+            height: 100vh;
+            width: 100vw;
+            touch-action: none; /* Prevent browser zooming/panning on mobile */
+        }
+
+        canvas {
+            display: block;
+            /* Keeps pixels sharp */
+            image-rendering: pixelated; 
+            image-rendering: crisp-edges;
+        }
+
+        /* Landscape Warning Overlay */
+        #landscape-warning {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            color: #fff;
+            z-index: 9999;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            text-align: center;
+            font-family: monospace;
+        }
+
+        #landscape-warning span {
+            font-size: 40px;
+            margin-bottom: 20px;
+        }
+
+        /* Show warning only on mobile portrait */
+        @media screen and (max-width: 768px) and (orientation: portrait) {
+            #landscape-warning {
+                display: flex;
+            }
+            .mobile-controls, #btn-fullscreen {
+                display: none !important; /* Hide UI when warning is up */
+            }
+        }
+
+        /* Mobile controls container */
+        .mobile-controls {
+            position: absolute;
+            bottom: 30px;
+            width: 100%;
+            height: 120px; /* Define height area for controls */
+            display: none; /* Hidden on desktop */
+            justify-content: space-between; /* Push groups to edges */
+            align-items: flex-end; /* Align to bottom */
+            padding: 0 40px; /* Safety margin from screen edges */
+            box-sizing: border-box;
+            pointer-events: none; /* Let clicks pass through empty space */
+        }
+
+        /* Fullscreen Toggle Button */
+        #btn-fullscreen {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 50px;
+            height: 50px;
+            border-radius: 10px;
+            font-size: 24px;
+            display: none; /* Hidden on desktop */
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        /* Show only on mobile/tablet */
+        @media (max-width: 768px) {
+            .mobile-controls {
+                display: flex;
+            }
+            /* Only show fullscreen button on mobile landscape (mostly) or just mobile in general */
+            #btn-fullscreen {
+                display: flex;
+            }
+        }
+
+        button {
+            pointer-events: auto;
+            background: rgba(255, 255, 255, 0.15);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            color: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(2px);
+            padding: 0; 
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            width: 70px; /* Slightly larger for easier touching */
+            height: 70px;
+            font-family: monospace;
+            font-size: 28px;
+            font-weight: bold;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+            transition: transform 0.1s, background 0.1s;
+        }
+        
+        button:active {
+            background: rgba(255, 255, 255, 0.4);
+            transform: scale(0.90);
+        }
+
+        /* Left side controls */
+        .d-pad {
+            display: flex;
+            gap: 15px;
+            pointer-events: auto;
+        }
+
+        /* Right side controls */
+        .action-pad {
+            display: flex;
+            gap: 20px; /* Wider gap for thumb reach */
+            pointer-events: auto;
+            margin-bottom: 10px; /* Slight offset if needed */
+        }
+
+        /* Visual styling for specific buttons */
+        #btn-atk {
+            background: rgba(255, 100, 100, 0.2);
+            border-color: rgba(255, 100, 100, 0.4);
+        }
+        
+        #btn-jump {
+            background: rgba(100, 100, 255, 0.2);
+            border-color: rgba(100, 100, 255, 0.4);
+            margin-bottom: 30px; /* Offset jump button slightly up for ergonomic thumb placement */
+        }
+    </style>
+</head>
+<body>
+
+    <div id="landscape-warning">
+        <span>⟳</span>
+        <div>Please Rotate Device</div>
+    </div>
+
+    <button id="btn-fullscreen">⛶</button>
+    <canvas id="gameCanvas"></canvas>
+
+    <div class="mobile-controls">
+        <div class="d-pad">
+            <button id="btn-left">←</button>
+            <button id="btn-right">→</button>
+        </div>
+        <div class="action-pad">
+            <button id="btn-atk">⚔</button>
+            <button id="btn-jump">↑</button>
+        </div>
+    </div>
+
+<script>
+/**
+ * PIXEL ART DATA
+ */
+const PALETTE = {
+    ' ': null, // Transparent
+    '.': '#000000', // Outline/Black
+    's': '#ffccaa', // Skin
+    'h': '#aaccff', // Helmet highlight
+    'm': '#666666', // Metal/Helmet
+    'b': '#3366ff', // Body/Armor Blue
+    'd': '#2244aa', // Dark Blue
+    'g': '#dddddd', // Grey/Blade
+    'w': '#8B4513'  // Wood/Hilt
+};
+
+// 12x12 Grid for the character frames
+const FRAMES = {
+    idle: [
+        [
+            "  mmmmmm    ",
+            " m.mhhmm.   ",
+            " m.mhhmm.   ",
+            " m.......   ",
+            "  .s.s.s.   ",
+            "  .......   ",
+            "  .bbbb.    ",
+            " .d.bb.d.   ",
+            " .d.bb.d.   ",
+            " ..bbbb..   ",
+            "  .m..m.    ",
+            "  ..  ..    "
+        ]
+    ],
+    run: [
+        [ // Frame 1: Leg Forward (Up)
+            "  mmmmmm    ",
+            " m.mhhmm.   ",
+            " m.mhhmm.   ",
+            " m.......   ",
+            "  .s.s.s.   ",
+            "  .......   ",
+            "  .bbbb.    ",
+            "  d.bb.d    ",
+            "  d.bb.d    ",
+            "  .bbbb.    ",
+            "    ...m.   ",
+            "       ..   "
+        ],
+        [ // Frame 2: Neutral (Down/Bob)
+            "            ", 
+            "  mmmmmm    ",
+            " m.mhhmm.   ",
+            " m.mhhmm.   ",
+            " m.......   ",
+            "  .s.s.s.   ",
+            "  .......   ",
+            "  .bbbb.    ",
+            " .d.bb.d.   ",
+            " .d.bb.d.   ",
+            " ..bbbb..   ",
+            "  .m..m.    "
+        ],
+        [ // Frame 3: Other Leg Forward (Up)
+            "  mmmmmm    ",
+            " m.mhhmm.   ",
+            " m.mhhmm.   ",
+            " m.......   ",
+            "  .s.s.s.   ",
+            "  .......   ",
+            "  .bbbb.    ",
+            "  d.bb.d    ",
+            "  d.bb.d    ",
+            "  .bbbb.    ",
+            "   .m...    ",
+            "   ..       "
+        ],
+        [ // Frame 4: Neutral (Down/Bob)
+            "            ", 
+            "  mmmmmm    ",
+            " m.mhhmm.   ",
+            " m.mhhmm.   ",
+            " m.......   ",
+            "  .s.s.s.   ",
+            "  .......   ",
+            "  .bbbb.    ",
+            " .d.bb.d.   ",
+            " .d.bb.d.   ",
+            " ..bbbb..   ",
+            "  .m..m.    "
+        ]
+    ],
+    attack: [
+        [ // Sword raised
+            "   gg       ",
+            "   gg       ",
+            "  mmmmmm    ",
+            " m.mhhmm.   ",
+            " m.......   ",
+            "  .s.s.s.   ",
+            "  .......   ",
+            "  wbbbb.    ",
+            " .w.bb.d.   ",
+            " ..bbbb..   ",
+            "  .m..m.    ",
+            "  ..  ..    "
+        ],
+        [ // Sword Swing
+            "            ",
+            "            ",
+            "  mmmmmm    ",
+            " m.mhhmm.   ",
+            " m.......   ",
+            "  .s.s.s.   ",
+            "  .......gww",
+            "  .bbbb.gggg",
+            " .d.bb.d.gww",
+            " ..bbbb..   ",
+            "  .m..m.    ",
+            "  ..  ..    "
+        ]
+    ]
+};
+
+// --- GAME ENGINE ---
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// Game State
+const state = {
+    x: 100,
+    y: 300, 
+    vx: 0,
+    vy: 0, // Vertical Velocity
+    groundY: 0, // Calculated in resize
+    facingRight: true,
+    anim: 'idle',
+    frameIndex: 0,
+    frameTimer: 0,
+    isAttacking: false,
+    isGrounded: false
+};
+
+// Configuration
+const PIXEL_SIZE = 6; 
+const MOVEMENT_SPEED = 4;
+const JUMP_FORCE = -14;  // Negative is Up
+const GRAVITY = 0.6;
+const ANIM_SPEED = 10; 
+const IDLE_SPEED = 45; 
+
+// Input tracking
+const keys = { 
+    ArrowRight: false, 
+    ArrowLeft: false, 
+    ArrowUp: false, 
+    Space: false 
+};
+
+// --- RESIZE HANDLING ---
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    // Calculate where the floor is
+    state.groundY = canvas.height - (12 * PIXEL_SIZE) - 50; 
+    
+    // If we were on the ground, snap to new ground
+    if (state.y >= state.groundY - 10) { // Tolerance check
+        state.y = state.groundY;
+        state.vy = 0;
+        state.isGrounded = true;
+    }
+}
+window.addEventListener('resize', resize);
+resize(); // Init size
+
+// --- INPUT HANDLING ---
+
+window.addEventListener('keydown', (e) => {
+    if(e.code === 'ArrowRight' || e.code === 'KeyD') keys.ArrowRight = true;
+    if(e.code === 'ArrowLeft' || e.code === 'KeyA') keys.ArrowLeft = true;
+    // Jump is now Spacebar (keeping Up/W as options too)
+    if(e.code === 'ArrowUp' || e.code === 'KeyW' || e.code === 'Space') keys.ArrowUp = true;
+    // Attack is now 'E' key
+    if(e.code === 'KeyE' && !state.isAttacking) triggerAttack();
+});
+
+window.addEventListener('keyup', (e) => {
+    if(e.code === 'ArrowRight' || e.code === 'KeyD') keys.ArrowRight = false;
+    if(e.code === 'ArrowLeft' || e.code === 'KeyA') keys.ArrowLeft = false;
+    if(e.code === 'ArrowUp' || e.code === 'KeyW' || e.code === 'Space') keys.ArrowUp = false;
+});
+
+// Mobile Controls
+const btnLeft = document.getElementById('btn-left');
+const btnRight = document.getElementById('btn-right');
+const btnJump = document.getElementById('btn-jump');
+const btnAtk = document.getElementById('btn-atk');
+const btnFull = document.getElementById('btn-fullscreen');
+
+// Fullscreen Logic
+btnFull.addEventListener('click', () => {
+    if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(err => {
+            console.log(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+        });
+    } else {
+        document.exitFullscreen();
+    }
+});
+// Add touch support for the toggle button to be responsive
+btnFull.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+    } else {
+        document.exitFullscreen();
+    }
+});
+
+
+const handleMobilePress = (key, val) => keys[key] = val;
+
+// Helper to add touch listeners
+const addTouchListener = (elem, key) => {
+    const startHandler = (e) => {
+        e.preventDefault(); 
+        handleMobilePress(key, true);
+    };
+    const endHandler = (e) => {
+        e.preventDefault(); 
+        handleMobilePress(key, false);
+    };
+
+    elem.addEventListener('touchstart', startHandler, {passive: false});
+    elem.addEventListener('touchend', endHandler, {passive: false});
+    
+    // Mouse fallbacks for testing
+    elem.addEventListener('mousedown', () => handleMobilePress(key, true));
+    elem.addEventListener('mouseup', () => handleMobilePress(key, false));
+    elem.addEventListener('mouseleave', () => handleMobilePress(key, false));
+};
+
+addTouchListener(btnLeft, 'ArrowLeft');
+addTouchListener(btnRight, 'ArrowRight');
+addTouchListener(btnJump, 'ArrowUp');
+
+const attackHandler = (e) => {
+    if(e.type === 'touchstart') e.preventDefault();
+    triggerAttack();
+};
+
+btnAtk.addEventListener('touchstart', attackHandler, {passive: false});
+btnAtk.addEventListener('mousedown', attackHandler);
+
+
+// --- LOGIC ---
+
+function triggerAttack() {
+    if (state.isAttacking) return;
+    state.isAttacking = true;
+    state.anim = 'attack';
+    state.frameIndex = 0;
+    
+    // Reset after animation matches frame count roughly
+    setTimeout(() => {
+        state.isAttacking = false;
+    }, 300);
+}
+
+function update() {
+    // 1. Horizontal Movement
+    if (!state.isAttacking) {
+        if (keys.ArrowRight) {
+            state.vx = MOVEMENT_SPEED;
+            state.facingRight = true;
+            state.anim = 'run';
+        } else if (keys.ArrowLeft) {
+            state.vx = -MOVEMENT_SPEED;
+            state.facingRight = false;
+            state.anim = 'run';
+        } else {
+            state.vx = 0;
+            state.anim = 'idle';
+        }
+    } else {
+        state.vx = 0; // Stop moving while attacking
+    }
+
+    // 2. Jumping Logic
+    if (keys.ArrowUp && state.isGrounded && !state.isAttacking) {
+        state.vy = JUMP_FORCE;
+        state.isGrounded = false;
+    }
+
+    // 3. Physics Application
+    state.vy += GRAVITY; // Apply gravity
+    state.x += state.vx;
+    state.y += state.vy;
+
+    // 4. Ground Collision
+    if (state.y >= state.groundY) {
+        state.y = state.groundY;
+        state.vy = 0;
+        state.isGrounded = true;
+    } else {
+        state.isGrounded = false;
+    }
+
+    // 5. Boundaries (Horizontal)
+    if (state.x < 10) state.x = 10;
+    if (state.x > canvas.width - (12 * PIXEL_SIZE) - 10) state.x = canvas.width - (12 * PIXEL_SIZE) - 10;
+
+    // 6. Animation State Overrides
+    // If in the air, freeze the frame (optional visual polish)
+    if (!state.isGrounded && !state.isAttacking) {
+        // Use the first frame of run or idle for "jumping" look
+        state.anim = 'run'; 
+        // Force a specific frame index if you want a static jump pose, 
+        // or let it cycle. Let's let it cycle for now as it looks okay.
+    }
+
+    // 7. Animation Timing
+    state.frameTimer++;
+    
+    let currentAnimSpeed = ANIM_SPEED;
+    if (state.anim === 'attack') currentAnimSpeed = 8;
+    if (state.anim === 'idle') currentAnimSpeed = IDLE_SPEED;
+    
+    if (state.frameTimer >= currentAnimSpeed) {
+        state.frameIndex++;
+        state.frameTimer = 0;
+        
+        // Loop frames
+        const maxFrames = FRAMES[state.anim].length;
+        if (state.frameIndex >= maxFrames) {
+            state.frameIndex = 0;
+        }
+    }
+}
+
+function drawPixelSprite(ctx, frameData, x, y, scale, flip) {
+    ctx.save();
+    
+    const width = frameData[0].length * scale;
+    
+    if (!flip) {
+        ctx.translate(x + width, y);
+        ctx.scale(-1, 1);
+    } else {
+        ctx.translate(x, y);
+    }
+
+    for (let r = 0; r < frameData.length; r++) {
+        const row = frameData[r];
+        for (let c = 0; c < row.length; c++) {
+            const char = row[c];
+            const color = PALETTE[char];
+
+            if (color) {
+                ctx.fillStyle = color;
+                ctx.fillRect(c * scale, r * scale, scale, scale);
+            }
+        }
+    }
+
+    ctx.restore();
+}
+
+function render() {
+    // Clear entire screen
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Get current frame data
+    const currentFrameSet = FRAMES[state.anim];
+    const safeIndex = state.frameIndex % currentFrameSet.length;
+    const pixelMap = currentFrameSet[safeIndex];
+
+    // Draw Character
+    drawPixelSprite(
+        ctx, 
+        pixelMap, 
+        state.x, 
+        state.y, 
+        PIXEL_SIZE, 
+        state.facingRight
+    );
+}
+
+// --- GAME LOOP ---
+
+function loop() {
+    update();
+    render();
+    requestAnimationFrame(loop);
+}
+
+loop();
+
+</script>
+</body>
+</html>

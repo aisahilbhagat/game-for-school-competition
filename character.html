@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Knight Character</title>
+    <style>
+        body {
+            background-color: #1a1a1a;
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars */
+            height: 100vh;
+            width: 100vw;
+        }
+
+        canvas {
+            display: block;
+            /* Keeps pixels sharp */
+            image-rendering: pixelated; 
+            image-rendering: crisp-edges;
+        }
+
+        /* Mobile controls for touch devices - subtle overlay */
+        .mobile-controls {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            display: none; /* Hidden on desktop, shown via JS logic if needed or media query */
+            justify-content: center;
+            gap: 20px;
+            pointer-events: none; /* Let clicks pass through empty space */
+        }
+
+        @media (max-width: 768px) {
+            .mobile-controls {
+                display: flex;
+            }
+        }
+
+        button {
+            pointer-events: auto;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            color: rgba(255, 255, 255, 0.5);
+            padding: 20px;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            font-family: monospace;
+            font-weight: bold;
+            user-select: none;
+        }
+        
+        button:active {
+            background: rgba(255, 255, 255, 0.3);
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div class="mobile-controls">
+        <button id="btn-left">←</button>
+        <button id="btn-atk">⚔</button>
+        <button id="btn-right">→</button>
+    </div>
+
+<script>
+/**
+ * PIXEL ART DATA
+ */
+const PALETTE = {
+    ' ': null, // Transparent
+    '.': '#000000', // Outline/Black
+    's': '#ffccaa', // Skin
+    'h': '#aaccff', // Helmet highlight
+    'm': '#666666', // Metal/Helmet
+    'b': '#3366ff', // Body/Armor Blue
+    'd': '#2244aa', // Dark Blue
+    'g': '#dddddd', // Grey/Blade
+    'w': '#8B4513'  // Wood/Hilt
+};
+
+// 12x12 Grid for the character frames
+const FRAMES = {
+    idle: [
+        [
+            "  mmmmmm    ",
+            " m.mhhmm.   ",
+            " m.mhhmm.   ",
+            " m.......   ",
+            "  .s.s.s.   ",
+            "  .......   ",
+            "  .bbbb.    ",
+            " .d.bb.d.   ",
+            " .d.bb.d.   ",
+            " ..bbbb..   ",
+            "  .m..m.    ",
+            "  ..  ..    "
+        ],
+        [ // Frame 2: Bob down 1 pixel (breathing)
+            "            ", 
+            "  mmmmmm    ",
+            " m.mhhmm.   ",
+            " m.mhhmm.   ",
+            " m.......   ",
+            "  .s.s.s.   ",
+            "  .......   ",
+            "  .bbbb.    ",
+            " .d.bb.d.   ",
+            " ..bbbb..   ",
+            "  .m..m.    ",
+            "  ..  ..    "
+        ]
+    ],
+    run: [
+        [ // Frame 1: Leg Forward (Up)
+            "  mmmmmm    ",
+            " m.mhhmm.   ",
+            " m.mhhmm.   ",
+            " m.......   ",
+            "  .s.s.s.   ",
+            "  .......   ",
+            "  .bbbb.    ",
+            "  d.bb.d    ",
+            "  d.bb.d    ",
+            "  .bbbb.    ",
+            "    ...m.   ",
+            "       ..   "
+        ],
+        [ // Frame 2: Neutral (Down/Bob)
+            "            ", 
+            "  mmmmmm    ",
+            " m.mhhmm.   ",
+            " m.mhhmm.   ",
+            " m.......   ",
+            "  .s.s.s.   ",
+            "  .......   ",
+            "  .bbbb.    ",
+            " .d.bb.d.   ",
+            " .d.bb.d.   ",
+            " ..bbbb..   ",
+            "  .m..m.    "
+        ],
+        [ // Frame 3: Other Leg Forward (Up)
+            "  mmmmmm    ",
+            " m.mhhmm.   ",
+            " m.mhhmm.   ",
+            " m.......   ",
+            "  .s.s.s.   ",
+            "  .......   ",
+            "  .bbbb.    ",
+            "  d.bb.d    ",
+            "  d.bb.d    ",
+            "  .bbbb.    ",
+            "   .m...    ",
+            "   ..       "
+        ],
+        [ // Frame 4: Neutral (Down/Bob)
+            "            ", 
+            "  mmmmmm    ",
+            " m.mhhmm.   ",
+            " m.mhhmm.   ",
+            " m.......   ",
+            "  .s.s.s.   ",
+            "  .......   ",
+            "  .bbbb.    ",
+            " .d.bb.d.   ",
+            " .d.bb.d.   ",
+            " ..bbbb..   ",
+            "  .m..m.    "
+        ]
+    ],
+    attack: [
+        [ // Sword raised
+            "   gg       ",
+            "   gg       ",
+            "  mmmmmm    ",
+            " m.mhhmm.   ",
+            " m.......   ",
+            "  .s.s.s.   ",
+            "  .......   ",
+            "  wbbbb.    ",
+            " .w.bb.d.   ",
+            " ..bbbb..   ",
+            "  .m..m.    ",
+            "  ..  ..    "
+        ],
+        [ // Sword Swing
+            "            ",
+            "            ",
+            "  mmmmmm    ",
+            " m.mhhmm.   ",
+            " m.......   ",
+            "  .s.s.s.   ",
+            "  .......gww",
+            "  .bbbb.gggg",
+            " .d.bb.d.gww",
+            " ..bbbb..   ",
+            "  .m..m.    ",
+            "  ..  ..    "
+        ]
+    ]
+};
+
+// --- GAME ENGINE ---
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// Game State
+const state = {
+    x: 100,
+    y: 300, // Will be updated on resize
+    vx: 0,
+    facingRight: true,
+    anim: 'idle',
+    frameIndex: 0,
+    frameTimer: 0,
+    isAttacking: false
+};
+
+// Configuration
+const PIXEL_SIZE = 6; // Increased size slightly since we have more screen space
+const SPEED = 4;      // Faster movement for larger screen
+const ANIM_SPEED = 10; 
+
+// Input tracking
+const keys = { ArrowRight: false, ArrowLeft: false, Space: false };
+
+// --- RESIZE HANDLING ---
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    // Keep character on the "ground" relative to bottom
+    state.y = canvas.height - (12 * PIXEL_SIZE) - 50; 
+}
+window.addEventListener('resize', resize);
+resize(); // Init size
+
+// --- INPUT HANDLING ---
+
+window.addEventListener('keydown', (e) => {
+    if(e.code === 'ArrowRight' || e.code === 'KeyD') keys.ArrowRight = true;
+    if(e.code === 'ArrowLeft' || e.code === 'KeyA') keys.ArrowLeft = true;
+    if((e.code === 'Space' || e.code === 'KeyZ') && !state.isAttacking) triggerAttack();
+});
+
+window.addEventListener('keyup', (e) => {
+    if(e.code === 'ArrowRight' || e.code === 'KeyD') keys.ArrowRight = false;
+    if(e.code === 'ArrowLeft' || e.code === 'KeyA') keys.ArrowLeft = false;
+});
+
+// Mobile Controls
+const btnLeft = document.getElementById('btn-left');
+const btnRight = document.getElementById('btn-right');
+const btnAtk = document.getElementById('btn-atk');
+
+const handleMobilePress = (key, val) => keys[key] = val;
+btnLeft.addEventListener('touchstart', (e) => { e.preventDefault(); handleMobilePress('ArrowLeft', true); });
+btnLeft.addEventListener('touchend', (e) => { e.preventDefault(); handleMobilePress('ArrowLeft', false); });
+btnRight.addEventListener('touchstart', (e) => { e.preventDefault(); handleMobilePress('ArrowRight', true); });
+btnRight.addEventListener('touchend', (e) => { e.preventDefault(); handleMobilePress('ArrowRight', false); });
+btnAtk.addEventListener('touchstart', (e) => { e.preventDefault(); triggerAttack(); });
+
+
+// --- LOGIC ---
+
+function triggerAttack() {
+    if (state.isAttacking) return;
+    state.isAttacking = true;
+    state.anim = 'attack';
+    state.frameIndex = 0;
+    
+    // Reset after animation matches frame count roughly
+    setTimeout(() => {
+        state.isAttacking = false;
+    }, 300);
+}
+
+function update() {
+    // Movement Logic
+    if (!state.isAttacking) {
+        if (keys.ArrowRight) {
+            state.vx = SPEED;
+            state.facingRight = true;
+            state.anim = 'run';
+        } else if (keys.ArrowLeft) {
+            state.vx = -SPEED;
+            state.facingRight = false;
+            state.anim = 'run';
+        } else {
+            state.vx = 0;
+            state.anim = 'idle';
+        }
+    } else {
+        state.vx = 0;
+    }
+
+    // Apply Velocity
+    state.x += state.vx;
+
+    // Boundaries
+    if (state.x < 10) state.x = 10;
+    if (state.x > canvas.width - (12 * PIXEL_SIZE) - 10) state.x = canvas.width - (12 * PIXEL_SIZE) - 10;
+
+    // Animation Timing
+    state.frameTimer++;
+    // Attack runs faster
+    const currentAnimSpeed = state.anim === 'attack' ? 8 : ANIM_SPEED;
+    
+    if (state.frameTimer >= currentAnimSpeed) {
+        state.frameIndex++;
+        state.frameTimer = 0;
+        
+        // Loop frames
+        const maxFrames = FRAMES[state.anim].length;
+        if (state.frameIndex >= maxFrames) {
+            state.frameIndex = 0;
+        }
+    }
+}
+
+function drawPixelSprite(ctx, frameData, x, y, scale, flip) {
+    ctx.save();
+    
+    const width = frameData[0].length * scale;
+    
+    if (!flip) {
+        ctx.translate(x + width, y);
+        ctx.scale(-1, 1);
+    } else {
+        ctx.translate(x, y);
+    }
+
+    for (let r = 0; r < frameData.length; r++) {
+        const row = frameData[r];
+        for (let c = 0; c < row.length; c++) {
+            const char = row[c];
+            const color = PALETTE[char];
+
+            if (color) {
+                ctx.fillStyle = color;
+                ctx.fillRect(c * scale, r * scale, scale, scale);
+            }
+        }
+    }
+
+    ctx.restore();
+}
+
+function render() {
+    // Clear entire screen
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Get current frame data
+    const currentFrameSet = FRAMES[state.anim];
+    const safeIndex = state.frameIndex % currentFrameSet.length;
+    const pixelMap = currentFrameSet[safeIndex];
+
+    // Draw Character
+    drawPixelSprite(
+        ctx, 
+        pixelMap, 
+        state.x, 
+        state.y, 
+        PIXEL_SIZE, 
+        state.facingRight
+    );
+}
+
+// --- GAME LOOP ---
+
+function loop() {
+    update();
+    render();
+    requestAnimationFrame(loop);
+}
+
+loop();
+
+</script>
+</body>
+</html>

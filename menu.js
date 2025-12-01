@@ -3,13 +3,19 @@ console.log("%c MENU.JS LOADED ", "background: #222; color: #bada55; font-size: 
 
 window.GameMenu = {
     active: true,
+    currentScreen: null, // Stores the active sub-screen object
     buttons: [],
-    stars: [], // Array to hold star data
-    lightParticles: [], // Floating particles near castle
-    mountainLights: [], // Stationary lights on mountains
-    comets: [], // Horror Comets
+    stars: [], 
+    lightParticles: [], 
+    mountainLights: [], 
+    comets: [], 
     cometTimer: 0,
     nextCometTime: 100,
+
+    // --- LIGHTNING (BOLT) VARIABLES ---
+    lightningBolts: [],
+    lightningTimer: 0,
+    nextLightningTime: 300, 
     
     init: function() {
         console.log("Initializing Menu System...");
@@ -45,6 +51,38 @@ window.GameMenu = {
         }, {passive: false});
     },
 
+    // --- SCRIPT LOADER & ROUTER ---
+    loadScreen: function(scriptName, globalObjectName) {
+        // If already loaded, just open it
+        if (window[globalObjectName]) {
+            this.openSubScreen(window[globalObjectName]);
+            return;
+        }
+
+        console.log(`Loading ${scriptName}...`);
+        const script = document.createElement('script');
+        script.src = scriptName;
+        script.onload = () => {
+            console.log(`${scriptName} loaded.`);
+            if (window[globalObjectName]) {
+                this.openSubScreen(window[globalObjectName]);
+            }
+        };
+        document.body.appendChild(script);
+    },
+
+    openSubScreen: function(screenObj) {
+        this.currentScreen = screenObj;
+        if (screenObj.init) screenObj.init();
+        // Reset mouse state to prevent stuck buttons
+        this.buttons.forEach(b => { b.isPressed = false; b.isHovered = false; });
+    },
+
+    closeSubScreen: function() {
+        this.currentScreen = null;
+        document.body.style.cursor = 'default';
+    },
+
     createStars: function() {
         this.stars = [];
         const count = 150;
@@ -76,7 +114,7 @@ window.GameMenu = {
 
         this.buttons = [
             createBtn('back', 'BACK', 40, 40, 120, 50),
-            createBtn('continue', 'CONTINUE', cx - btnW/2, startY, btnW, btnH),
+            createBtn('load_game', 'LOAD GAME', cx - btnW/2, startY, btnW, btnH),
             createBtn('new_game', 'NEW GAME', cx - btnW/2, startY + (btnH + gap), btnW, btnH),
             createBtn('settings', 'SETTINGS', cx - btnW/2, startY + (btnH + gap) * 2, btnW, btnH)
         ];
@@ -95,6 +133,13 @@ window.GameMenu = {
         if (!this.active) return;
         const canvas = document.querySelector('canvas');
         if (!canvas) return;
+        
+        // DELEGATE TO SUB-SCREEN IF ACTIVE
+        if (this.currentScreen && this.currentScreen.handleMouseMove) {
+            this.currentScreen.handleMouseMove(e, canvas);
+            return;
+        }
+
         const pos = this.getMousePos(e, canvas);
 
         for (const btn of this.buttons) {
@@ -115,6 +160,13 @@ window.GameMenu = {
         if (!this.active) return;
         const canvas = document.querySelector('canvas');
         if (!canvas) return;
+
+        // DELEGATE TO SUB-SCREEN IF ACTIVE
+        if (this.currentScreen && this.currentScreen.handleMouseDown) {
+            this.currentScreen.handleMouseDown(e, canvas);
+            return;
+        }
+
         const pos = this.getMousePos(e, canvas);
 
         for (const btn of this.buttons) {
@@ -127,11 +179,29 @@ window.GameMenu = {
 
     handleMouseUp: function(e) {
         if (!this.active) return;
+        
+        // DELEGATE TO SUB-SCREEN IF ACTIVE
+        if (this.currentScreen && this.currentScreen.handleMouseUp) {
+            this.currentScreen.handleMouseUp(e);
+            return;
+        }
+
         for (const btn of this.buttons) {
             if (btn.isPressed) {
                 btn.isPressed = false;
                 btn.targetScale = btn.isHovered ? 1.1 : 1.0; 
-                if (btn.isHovered && btn.id === 'back') this.resumeGame();
+                
+                if (btn.isHovered) {
+                    if (btn.id === 'back') {
+                        this.resumeGame();
+                    } else if (btn.id === 'load_game') {
+                        this.loadScreen('loadgame.js', 'LoadGameScreen');
+                    } else if (btn.id === 'new_game') {
+                        this.loadScreen('newgame.js', 'NewGameScreen');
+                    } else if (btn.id === 'settings') {
+                        this.loadScreen('settings.js', 'SettingsScreen');
+                    }
+                }
             }
         }
     },
@@ -147,7 +217,7 @@ window.GameMenu = {
         window.removeEventListener('resize', this.setupLayout);
     },
 
-    // --- PARTICLES ---
+    // --- PARTICLES & VISUALS ---
     updateLights: function(w, h) {
         const cx = w / 2;
         const groundY = h - 60;
@@ -302,7 +372,84 @@ window.GameMenu = {
         ctx.restore();
     },
 
-    // --- HORROR CASTLE DRAWING ---
+    updateLightning: function(w, h) {
+        this.lightningTimer++;
+        if (this.lightningTimer > this.nextLightningTime) {
+            this.lightningTimer = 0;
+            this.nextLightningTime = 180 + Math.random() * 400; 
+            this.createBolt(w, h);
+        }
+
+        for (let i = this.lightningBolts.length - 1; i >= 0; i--) {
+            const bolt = this.lightningBolts[i];
+            bolt.life++;
+            if (bolt.life > bolt.maxLife) {
+                this.lightningBolts.splice(i, 1);
+            }
+        }
+    },
+
+    createBolt: function(w, h) {
+        const startX = Math.random() * w;
+        const startY = -50;
+        let currentX = startX;
+        let currentY = startY;
+        const segments = [{x: currentX, y: currentY}];
+        const groundY = h - 60;
+
+        while (currentY < groundY) {
+            const len = 20 + Math.random() * 40;
+            currentY += len;
+            currentX += (Math.random() - 0.5) * 80; 
+            segments.push({x: currentX, y: currentY});
+            if (Math.random() > 0.95) break;
+        }
+
+        this.lightningBolts.push({
+            segments: segments,
+            life: 0,
+            maxLife: 15, 
+            color: '#e0e0ff',
+            width: 2 + Math.random() * 2
+        });
+    },
+
+    drawLightning: function(ctx) {
+        ctx.save();
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = 'rgba(200, 220, 255, 0.9)';
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        for (const bolt of this.lightningBolts) {
+            let alpha = 1;
+            if (bolt.life % 4 === 0 || bolt.life % 4 === 1) alpha = 1;
+            else alpha = 0.3;
+
+            if (bolt.life > bolt.maxLife - 5) {
+                alpha *= (bolt.maxLife - bolt.life) / 5;
+            }
+
+            ctx.globalAlpha = Math.max(0, alpha);
+            ctx.strokeStyle = bolt.color;
+            ctx.lineWidth = bolt.width;
+
+            ctx.beginPath();
+            if (bolt.segments.length > 0) {
+                ctx.moveTo(bolt.segments[0].x, bolt.segments[0].y);
+                for (let i = 1; i < bolt.segments.length; i++) {
+                    ctx.lineTo(bolt.segments[i].x, bolt.segments[i].y);
+                }
+            }
+            ctx.stroke();
+
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = '#ffffff';
+            ctx.stroke();
+        }
+        ctx.restore();
+    },
+
     drawCastlePixelArt: function(ctx, cx, groundY, scale) {
         ctx.save();
         const darkBrick = '#110b0b'; const midBrick = '#1a1010'; 
@@ -313,16 +460,12 @@ window.GameMenu = {
             ctx.fillRect(cx + x * scale, groundY - y * scale, w * scale, h * scale);
         };
 
-        // Helper for Drawing Windows (Both Houses and Castle)
         const drawWindow = (x, y, w, h) => {
-            // Logic: Is this window lit? (Based on position so it's stable)
-            // 85% chance of light for populated look
             const seed = Math.abs(x * 100 + y); 
             const isLit = (seed % 10 > 1); 
             
             if (isLit) {
                 ctx.save();
-                // 70% of lit windows flicker
                 const isFlickering = (seed % 10 > 2); 
                 let alpha = 0.9;
                 if (isFlickering) {
@@ -337,7 +480,6 @@ window.GameMenu = {
             }
         };
 
-        // --- BACKGROUND HILLS ---
         ctx.fillStyle = '#0a0505';
         ctx.beginPath();
         ctx.moveTo(0, groundY);
@@ -353,8 +495,6 @@ window.GameMenu = {
         const drawHouse = (x, w, h, roofH) => {
              drawBlock(x, h, w, h, midBrick); 
              for(let r=0; r < roofH; r+=5) drawBlock(x + r/2, h + r + 5, w - r, 5, darkBrick);
-             
-             // Draw Window using new helper
              drawWindow(x + w/2 - 2, h/2 + 5, 4, 8);
         };
 
@@ -387,7 +527,6 @@ window.GameMenu = {
         drawBlock(-125, 140, 20, 30, midBrick); drawBlock(105, 140, 20, 30, midBrick);
         
         const winW = 4, winH = 15;
-        // Updated Castle Windows to use Lit/Flickering Logic
         drawWindow(-15, 120, winW, winH); 
         drawWindow(11, 120, winW, winH);
         drawWindow(-115, 100, winW, winH); 
@@ -420,7 +559,8 @@ window.GameMenu = {
         this.drawComets(ctx); 
         this.drawCastlePixelArt(ctx, w/2, groundY, 0.6);
         this.drawLights(ctx); 
-        this.drawMountainLights(ctx); 
+        this.drawMountainLights(ctx);
+        this.drawLightning(ctx);
 
         const vGrad = ctx.createRadialGradient(w/2, h/2, h/3, w/2, h/2, w);
         vGrad.addColorStop(0, 'rgba(0,0,0,0)'); vGrad.addColorStop(1, 'rgba(0,0,0,0.85)');
@@ -429,12 +569,21 @@ window.GameMenu = {
 
     render: function(ctx, canvas) {
         if (!this.active) return;
+
+        // 1. IF SUB-SCREEN IS ACTIVE, RENDER IT AND STOP
+        if (this.currentScreen && this.currentScreen.render) {
+            this.currentScreen.render(ctx, canvas);
+            return;
+        }
+
+        // 2. OTHERWISE RENDER MAIN MENU
         const w = canvas.width;
         const h = canvas.height;
 
         this.updateLights(w, h);
         this.updateMountainLights(w, h);
-        this.updateComets(w, h); 
+        this.updateComets(w, h);
+        this.updateLightning(w, h);
 
         ctx.save();
         this.drawBackground(ctx, w, h);
@@ -456,6 +605,7 @@ window.GameMenu = {
 
             ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(drawX + 6, drawY + 6, btn.w, btn.h);
             ctx.fillStyle = btn.isHovered ? btn.hoverColor : btn.baseColor; ctx.fillRect(drawX, drawY, btn.w, btn.h);
+            
             ctx.lineWidth = 2; ctx.strokeStyle = '#aaaaaa'; ctx.beginPath();
             ctx.moveTo(drawX + btn.w, drawY); ctx.lineTo(drawX, drawY); ctx.lineTo(drawX, drawY + btn.h); ctx.stroke();
             ctx.strokeStyle = '#333333'; ctx.beginPath();

@@ -2,8 +2,21 @@
 console.log("%c MENU.JS LOADED ", "background: #222; color: #bada55; font-size: 20px");
 
 window.GameMenu = {
-    active: true,
-    currentScreen: null, // Stores the active sub-screen object
+    // --- STATE ---
+    _active: true, // Internal variable
+    
+    // ✅ MAGIC SETTER: Stops music automatically when Engine sets active = false
+    get active() { 
+        return this._active; 
+    },
+    set active(value) {
+        this._active = value;
+        if (value === false) {
+            this.stopMusic();
+        }
+    },
+
+    currentScreen: null, 
     buttons: [],
     stars: [], 
     lightParticles: [], 
@@ -11,6 +24,10 @@ window.GameMenu = {
     comets: [], 
     cometTimer: 0,
     nextCometTime: 100,
+
+    // --- AUDIO ---
+    menuMusic: new Audio('menu-bg-sound.ogg'),
+    clickSound: new Audio('mouse-click.wav'), 
 
     // --- LIGHTNING (BOLT) VARIABLES ---
     lightningBolts: [],
@@ -20,8 +37,27 @@ window.GameMenu = {
     init: function() {
         console.log("Initializing Menu System...");
         
+        // 1. Pause Main Game Ambience
         if (window.AudioManager) {
             window.AudioManager.pause();
+        }
+
+        // 2. Start Menu Music
+        this.menuMusic.loop = true;
+
+        // --- LOAD SAVED VOLUME ---
+        const savedVolume = localStorage.getItem('adventureGame_musicVolume');
+        if (savedVolume !== null) {
+            this.menuMusic.volume = parseFloat(savedVolume);
+        } else {
+            this.menuMusic.volume = 0.5; 
+        }
+        
+        const playPromise = this.menuMusic.play();
+        if (playPromise !== undefined) {
+            playPromise.catch(error => {
+                console.log("Menu music blocked (interaction needed).");
+            });
         }
 
         this.setupLayout();
@@ -51,9 +87,26 @@ window.GameMenu = {
         }, {passive: false});
     },
 
+    // ✅ Helper to cleanly stop music
+    stopMusic: function() {
+        if (this.menuMusic) {
+            this.menuMusic.pause();
+            this.menuMusic.currentTime = 0;
+            console.log("Menu Music Stopped.");
+        }
+    },
+
+    // --- VOLUME CONTROL ---
+    setMusicVolume: function(val) {
+        if (this.menuMusic) {
+            val = Math.max(0, Math.min(1, val));
+            this.menuMusic.volume = val;
+            localStorage.setItem('adventureGame_musicVolume', val);
+        }
+    },
+
     // --- SCRIPT LOADER & ROUTER ---
     loadScreen: function(scriptName, globalObjectName) {
-        // If already loaded, just open it
         if (window[globalObjectName]) {
             this.openSubScreen(window[globalObjectName]);
             return;
@@ -63,7 +116,6 @@ window.GameMenu = {
         const script = document.createElement('script');
         script.src = scriptName;
         script.onload = () => {
-            console.log(`${scriptName} loaded.`);
             if (window[globalObjectName]) {
                 this.openSubScreen(window[globalObjectName]);
             }
@@ -74,7 +126,6 @@ window.GameMenu = {
     openSubScreen: function(screenObj) {
         this.currentScreen = screenObj;
         if (screenObj.init) screenObj.init();
-        // Reset mouse state to prevent stuck buttons
         this.buttons.forEach(b => { b.isPressed = false; b.isHovered = false; });
     },
 
@@ -134,7 +185,6 @@ window.GameMenu = {
         const canvas = document.querySelector('canvas');
         if (!canvas) return;
         
-        // DELEGATE TO SUB-SCREEN IF ACTIVE
         if (this.currentScreen && this.currentScreen.handleMouseMove) {
             this.currentScreen.handleMouseMove(e, canvas);
             return;
@@ -161,7 +211,6 @@ window.GameMenu = {
         const canvas = document.querySelector('canvas');
         if (!canvas) return;
 
-        // DELEGATE TO SUB-SCREEN IF ACTIVE
         if (this.currentScreen && this.currentScreen.handleMouseDown) {
             this.currentScreen.handleMouseDown(e, canvas);
             return;
@@ -173,6 +222,9 @@ window.GameMenu = {
             if (pos.x >= btn.x && pos.x <= btn.x + btn.w && pos.y >= btn.y && pos.y <= btn.y + btn.h) {
                 btn.isPressed = true;
                 btn.targetScale = 0.95; 
+
+                this.clickSound.currentTime = 0;
+                this.clickSound.play().catch(err => {});
             }
         }
     },
@@ -180,7 +232,6 @@ window.GameMenu = {
     handleMouseUp: function(e) {
         if (!this.active) return;
         
-        // DELEGATE TO SUB-SCREEN IF ACTIVE
         if (this.currentScreen && this.currentScreen.handleMouseUp) {
             this.currentScreen.handleMouseUp(e);
             return;
@@ -207,10 +258,12 @@ window.GameMenu = {
     },
 
     resumeGame: function() {
-        this.active = false;
+        this.active = false; // Triggers setter -> Triggers stopMusic()
+        
         document.body.style.cursor = 'default';
         if (window.AudioManager) window.AudioManager.play();
         if (window.resetWelcomeScreen) window.resetWelcomeScreen();
+        
         window.removeEventListener('mousemove', this.handleMouseMove);
         window.removeEventListener('mousedown', this.handleMouseDown);
         window.removeEventListener('mouseup', this.handleMouseUp);
